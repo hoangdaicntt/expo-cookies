@@ -7,43 +7,47 @@ public class ExpoCookiesModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ExpoCookies")
 
-    AsyncFunction("set") { (url: String, cookie: [String: Any], useWebKit: Bool) -> Bool in
-      return await self.setCookie(url: url, cookie: cookie, useWebKit: useWebKit)
+    // Sử dụng Promise thay vì async/await để tương thích với Expo Module API
+    AsyncFunction("set") { (url: String, cookie: [String: Any], useWebKit: Bool, promise: Promise) in
+      self.setCookie(url: url, cookie: cookie, useWebKit: useWebKit, promise: promise)
     }
 
-    AsyncFunction("setFromResponse") { (url: String, cookieHeader: String) -> Bool in
-      return await self.setFromResponseHeader(url: url, cookieHeader: cookieHeader)
+    AsyncFunction("setFromResponse") { (url: String, cookieHeader: String, promise: Promise) in
+      self.setFromResponseHeader(url: url, cookieHeader: cookieHeader, promise: promise)
     }
 
-    AsyncFunction("get") { (url: String, useWebKit: Bool) -> [String: [String: Any]] in
-      return await self.getCookies(url: url, useWebKit: useWebKit)
+    AsyncFunction("get") { (url: String, useWebKit: Bool, promise: Promise) in
+      self.getCookies(url: url, useWebKit: useWebKit, promise: promise)
     }
 
-    AsyncFunction("getAll") { (useWebKit: Bool) -> [String: [String: Any]] in
-      return await self.getAllCookies(useWebKit: useWebKit)
+    AsyncFunction("getAll") { (useWebKit: Bool, promise: Promise) in
+      self.getAllCookies(useWebKit: useWebKit, promise: promise)
     }
 
-    AsyncFunction("clearAll") { (useWebKit: Bool) -> Bool in
-      return await self.clearAllCookies(useWebKit: useWebKit)
+    AsyncFunction("clearAll") { (useWebKit: Bool, promise: Promise) in
+      self.clearAllCookies(useWebKit: useWebKit, promise: promise)
     }
 
-    AsyncFunction("clearByName") { (url: String, name: String, useWebKit: Bool) -> Bool in
-      return await self.clearCookieByName(url: url, name: name, useWebKit: useWebKit)
+    AsyncFunction("clearByName") { (url: String, name: String, useWebKit: Bool, promise: Promise) in
+      self.clearCookieByName(url: url, name: name, useWebKit: useWebKit, promise: promise)
     }
 
-    AsyncFunction("flush") { () -> Bool in
+    AsyncFunction("flush") { (promise: Promise) in
       // iOS doesn't need explicit flushing
-      return true
+      promise.resolve(true)
     }
 
-    AsyncFunction("removeSessionCookies") { () -> Bool in
+    AsyncFunction("removeSessionCookies") { (promise: Promise) in
       // iOS handles session cookies automatically
-      return true
+      promise.resolve(true)
     }
   }
 
-  private func setCookie(url: String, cookie: [String: Any], useWebKit: Bool) async -> Bool {
-    guard let urlObj = URL(string: url) else { return false }
+  private func setCookie(url: String, cookie: [String: Any], useWebKit: Bool, promise: Promise) {
+    guard let urlObj = URL(string: url) else {
+      promise.resolve(false)
+      return
+    }
 
     let name = cookie["name"] as? String ?? ""
     let value = cookie["value"] as? String ?? ""
@@ -78,26 +82,30 @@ public class ExpoCookiesModule: Module {
       properties[.httpOnly] = "TRUE"
     }
 
-    guard let httpCookie = HTTPCookie(properties: properties) else { return false }
+    guard let httpCookie = HTTPCookie(properties: properties) else {
+      promise.resolve(false)
+      return
+    }
 
     if useWebKit {
       if #available(iOS 11.0, *) {
-        return await withCheckedContinuation { continuation in
-          WKWebsiteDataStore.default().httpCookieStore.setCookie(httpCookie) {
-            continuation.resume(returning: true)
-          }
+        WKWebsiteDataStore.default().httpCookieStore.setCookie(httpCookie) {
+          promise.resolve(true)
         }
       } else {
-        return false
+        promise.resolve(false)
       }
     } else {
       HTTPCookieStorage.shared.setCookie(httpCookie)
-      return true
+      promise.resolve(true)
     }
   }
 
-  private func setFromResponseHeader(url: String, cookieHeader: String) async -> Bool {
-    guard let urlObj = URL(string: url) else { return false }
+  private func setFromResponseHeader(url: String, cookieHeader: String, promise: Promise) {
+    guard let urlObj = URL(string: url) else {
+      promise.resolve(false)
+      return
+    }
 
     let cookies = HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": cookieHeader], for: urlObj)
 
@@ -105,73 +113,64 @@ public class ExpoCookiesModule: Module {
       HTTPCookieStorage.shared.setCookie(cookie)
     }
 
-    return true
+    promise.resolve(true)
   }
 
-  private func getCookies(url: String, useWebKit: Bool) async -> [String: [String: Any]] {
-    guard let urlObj = URL(string: url) else { return [:] }
-
-    let cookies: [HTTPCookie]
-
-    if useWebKit {
-      if #available(iOS 11.0, *) {
-        cookies = await withCheckedContinuation { continuation in
-          WKWebsiteDataStore.default().httpCookieStore.getAllCookies { allCookies in
-            let filteredCookies = allCookies.filter { cookie in
-              return cookie.domain == urlObj.host || cookie.domain.hasPrefix("." + (urlObj.host ?? ""))
-            }
-            continuation.resume(returning: filteredCookies)
-          }
-        }
-      } else {
-        cookies = []
-      }
-    } else {
-      cookies = HTTPCookieStorage.shared.cookies(for: urlObj) ?? []
+  private func getCookies(url: String, useWebKit: Bool, promise: Promise) {
+    guard let urlObj = URL(string: url) else {
+      promise.resolve([:])
+      return
     }
 
-    return cookiesToDictionary(cookies)
-  }
-
-  private func getAllCookies(useWebKit: Bool) async -> [String: [String: Any]] {
-    let cookies: [HTTPCookie]
-
     if useWebKit {
       if #available(iOS 11.0, *) {
-        cookies = await withCheckedContinuation { continuation in
-          WKWebsiteDataStore.default().httpCookieStore.getAllCookies { allCookies in
-            continuation.resume(returning: allCookies)
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { allCookies in
+          let filteredCookies = allCookies.filter { cookie in
+            return cookie.domain == urlObj.host || cookie.domain.hasPrefix("." + (urlObj.host ?? ""))
           }
+          promise.resolve(self.cookiesToDictionary(filteredCookies))
         }
       } else {
-        cookies = []
+        promise.resolve([:])
       }
     } else {
-      cookies = HTTPCookieStorage.shared.cookies ?? []
+      let cookies = HTTPCookieStorage.shared.cookies(for: urlObj) ?? []
+      promise.resolve(cookiesToDictionary(cookies))
     }
-
-    return cookiesToDictionary(cookies)
   }
 
-  private func clearAllCookies(useWebKit: Bool) async -> Bool {
+  private func getAllCookies(useWebKit: Bool, promise: Promise) {
     if useWebKit {
       if #available(iOS 11.0, *) {
-        return await withCheckedContinuation { continuation in
-          WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-            let group = DispatchGroup()
-            for cookie in cookies {
-              group.enter()
-              WKWebsiteDataStore.default().httpCookieStore.delete(cookie) {
-                group.leave()
-              }
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { allCookies in
+          promise.resolve(self.cookiesToDictionary(allCookies))
+        }
+      } else {
+        promise.resolve([:])
+      }
+    } else {
+      let cookies = HTTPCookieStorage.shared.cookies ?? []
+      promise.resolve(cookiesToDictionary(cookies))
+    }
+  }
+
+  private func clearAllCookies(useWebKit: Bool, promise: Promise) {
+    if useWebKit {
+      if #available(iOS 11.0, *) {
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+          let group = DispatchGroup()
+          for cookie in cookies {
+            group.enter()
+            WKWebsiteDataStore.default().httpCookieStore.delete(cookie) {
+              group.leave()
             }
-            group.notify(queue: .main) {
-              continuation.resume(returning: true)
-            }
+          }
+          group.notify(queue: .main) {
+            promise.resolve(true)
           }
         }
       } else {
-        return false
+        promise.resolve(false)
       }
     } else {
       if let cookies = HTTPCookieStorage.shared.cookies {
@@ -179,43 +178,45 @@ public class ExpoCookiesModule: Module {
           HTTPCookieStorage.shared.deleteCookie(cookie)
         }
       }
-      return true
+      promise.resolve(true)
     }
   }
 
-  private func clearCookieByName(url: String, name: String, useWebKit: Bool) async -> Bool {
-    guard let urlObj = URL(string: url) else { return false }
+  private func clearCookieByName(url: String, name: String, useWebKit: Bool, promise: Promise) {
+    guard let urlObj = URL(string: url) else {
+      promise.resolve(false)
+      return
+    }
 
     if useWebKit {
       if #available(iOS 11.0, *) {
-        return await withCheckedContinuation { continuation in
-          WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-            let cookieToDelete = cookies.first { cookie in
-              cookie.name == name && (cookie.domain == urlObj.host || cookie.domain.hasPrefix("." + (urlObj.host ?? "")))
-            }
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+          let cookieToDelete = cookies.first { cookie in
+            cookie.name == name && (cookie.domain == urlObj.host || cookie.domain.hasPrefix("." + (urlObj.host ?? "")))
+          }
 
-            if let cookie = cookieToDelete {
-              WKWebsiteDataStore.default().httpCookieStore.delete(cookie) {
-                continuation.resume(returning: true)
-              }
-            } else {
-              continuation.resume(returning: false)
+          if let cookie = cookieToDelete {
+            WKWebsiteDataStore.default().httpCookieStore.delete(cookie) {
+              promise.resolve(true)
             }
+          } else {
+            promise.resolve(false)
           }
         }
       } else {
-        return false
+        promise.resolve(false)
       }
     } else {
       if let cookies = HTTPCookieStorage.shared.cookies(for: urlObj) {
         for cookie in cookies {
           if cookie.name == name {
             HTTPCookieStorage.shared.deleteCookie(cookie)
-            return true
+            promise.resolve(true)
+            return
           }
         }
       }
-      return false
+      promise.resolve(false)
     }
   }
 

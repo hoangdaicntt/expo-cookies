@@ -4,10 +4,9 @@ package expo.modules.cookies
 import android.webkit.CookieManager
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import kotlinx.coroutines.suspendCancellableCoroutine
+import expo.modules.kotlin.Promise
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.coroutines.resume
 
 class ExpoCookiesModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -29,8 +28,8 @@ class ExpoCookiesModule : Module() {
       getAllCookies()
     }
 
-    AsyncFunction("clearAll") { useWebKit: Boolean ->
-      clearAllCookies()
+    AsyncFunction("clearAll") { useWebKit: Boolean, promise: Promise ->
+      clearAllCookies(promise)
     }
 
     AsyncFunction("clearByName") { url: String, name: String, useWebKit: Boolean ->
@@ -41,8 +40,8 @@ class ExpoCookiesModule : Module() {
       flushCookies()
     }
 
-    AsyncFunction("removeSessionCookies") { ->
-      removeSessionCookies()
+    AsyncFunction("removeSessionCookies") { promise: Promise ->
+      removeSessionCookies(promise)
     }
   }
 
@@ -124,17 +123,14 @@ class ExpoCookiesModule : Module() {
     return emptyMap()
   }
 
-  private suspend fun clearAllCookies(): Boolean {
-    return try {
+  private fun clearAllCookies(promise: Promise) {
+    try {
       val cookieManager = CookieManager.getInstance()
-      // Use suspendCancellableCoroutine to properly handle the callback
-      suspendCancellableCoroutine { continuation ->
-        cookieManager.removeAllCookies { success ->
-          continuation.resume(success)
-        }
+      cookieManager.removeAllCookies { success ->
+        promise.resolve(success)
       }
     } catch (e: Exception) {
-      false
+      promise.reject("CLEAR_ALL_COOKIES_ERROR", "Failed to clear all cookies", e)
     }
   }
 
@@ -177,17 +173,14 @@ class ExpoCookiesModule : Module() {
     }
   }
 
-  private suspend fun removeSessionCookies(): Boolean {
-    return try {
+  private fun removeSessionCookies(promise: Promise) {
+    try {
       val cookieManager = CookieManager.getInstance()
-      // Use suspendCancellableCoroutine to properly handle the callback
-      suspendCancellableCoroutine { continuation ->
-        cookieManager.removeSessionCookies { success ->
-          continuation.resume(success)
-        }
+      cookieManager.removeSessionCookies { success ->
+        promise.resolve(success)
       }
     } catch (e: Exception) {
-      false
+      promise.reject("REMOVE_SESSION_COOKIES_ERROR", "Failed to remove session cookies", e)
     }
   }
 
