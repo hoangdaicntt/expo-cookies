@@ -7,7 +7,6 @@ public class ExpoCookiesModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ExpoCookies")
 
-    // Sử dụng Promise thay vì async/await để tương thích với Expo Module API
     AsyncFunction("set") { (url: String, cookie: [String: Any], useWebKit: Bool, promise: Promise) in
       self.setCookie(url: url, cookie: cookie, useWebKit: useWebKit, promise: promise)
     }
@@ -79,7 +78,7 @@ public class ExpoCookiesModule: Module {
     }
 
     if httpOnly {
-      properties[.httpOnly] = "TRUE"
+      properties[HTTPCookiePropertyKey(rawValue: "HttpOnly")] = "TRUE"
     }
 
     guard let httpCookie = HTTPCookie(properties: properties) else {
